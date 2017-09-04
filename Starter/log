@@ -1,0 +1,133 @@
+Result
+
+Loading Data
+>>> from pyspark import SparkContext, SparkConf
+>>> from pyspark.sql import SQLContext
+>>> sqlContext = SQLContext(sc)
+>>> df = sqlContext.read.json('s3a://oxclo-assignment/ip-20170715-sampled.json')
+[Stage 0:>                                                        (0 + 19) / 19]
+
+Q1 - How many record
+>>> count = df.rdd.map(lambda row: 1).reduce(lambda a,b: a+b)
+[Stage 2:>                                                        (0 + 19) / 19]
+>>> print count
+151613
+
+Q2 - How many record for each country code
+>>> countries = df.rdd.filter(lambda row: row.location is not None).map(lambda row: (row.location.country_code, 1)).reduceByKey(lambda a,b: a+b).sortBy(lambda x: x[1], False)
+[Stage 9:>                                                        (0 + 19) / 19]
+>>> for k,v in countries.collect()[:10]:                                        
+...     print k,v
+... 
+US 55048
+CN 11158
+MX 8857
+DE 6368
+GB 4676
+KR 4422
+RU 3893
+IT 3795
+BR 3577
+IN 3466
+
+Q3 - Percentaget of HTTP to Https
+>>> https_count = df.rdd.filter(lambda row: row.p443 is not None).map(lambda row: 1).reduce(lambda a,b: a+b)
+>>>                                                                             
+>>> http_count = df.rdd.filter(lambda row: row.p80 is not None).map(lambda row: 1).reduce(lambda a,b: a+b)
+>>>                                                                             
+>>> both = df.rdd.filter(lambda row: row.p80 is not None).filter(lambda row: row.p443 is not None).map(lambda row: 1).reduce(lambda a,b: a+b)
+[Stage 18:>                                                       (0 + 19) / 19]
+>>> print float(https_count)/total                                              
+0.53922816645
+>>> print float(http_count)/total
+0.353004029997
+>>> print float(both)/total
+0.203986465541
+
+Q4 - Heartbleed Percentage
+>>> https = df.rdd.filter(lambda row: row.p443 is not None)
+>>> heartbleeds = https.filter(lambda row: row.p443.https.heartbleed is not None and row.p443.https.heartbleed.heartbleed_vulnerable )
+>>> count = heartbleeds.map(lambda row: 1).reduce(lambda a,b: a+b)
+[Stage 20:>                                                       (0 + 19) / 19]
+>>> print float(count)/total                                                    
+0.00081787181838
+
+Q5 - Percentage Heartbleeding per country
+>>> https = df.rdd.filter(lambda row: row.p443 is not None and row.location is not None)
+>>> heartbleeds = https.filter(lambda row: row.p443.https.heartbleed is not None and row.p443.https.heartbleed.heartbleed_vulnerable )
+>>> countries = heartbleeds.map(lambda row: (row.location.country_code, 1)).reduceByKey(lambda a,b: a+b)
+>>> total_https = https.map(lambda row: (row.location.country_code, 1)).reduceByKey(lambda a,b: a+b)
+>>> percent = countries.join(total_https).map(lambda row: (row[0], float(row[1][0])/row[1][1])).sortBy(lambda x: x[1], False)
+[Stage 21:>               (0 + 19) / 19][Stage 22:>                (0 + 0) / 19]
+>>> for k,v in percent.collect()[:10]:
+...     print k,v
+... 
+HN 0.25                                                                         
+BD 0.047619047619
+TT 0.0434782608696
+LU 0.0217391304348
+IL 0.0192307692308
+MD 0.0175438596491
+HU 0.017094017094
+PH 0.0128205128205
+AE 0.0113636363636
+CZ 0.0093896713615
+
+Q6 - Percentage Windows vs Ubuntu
+>>> has_meta = df.rdd.filter(lambda row: row.metadata is not None and row.metadata.os is not None)
+>>> total_os = has_meta.map(lambda row: 1).reduce(lambda a,b: a+b)
+>>> windows = has_meta.filter(lambda row: row.metadata.os is not None and row.metadata.os.lower() == "windows").map(lambda row: 1).reduce(lambda a,b: a+b)
+>>> ubuntu = has_meta.filter(lambda row: row.metadata.os is not None and row.metadata.os.lower() == "ubuntu").map(lambda row: 1).reduce(lambda a,b: a+b)
+[Stage 33:>                                                       (0 + 19) / 19]
+>>> print float (windows)/total_os                                              
+0.210217755444
+>>> print float (ubuntu)/total_os
+0.211414213927
+
+Q7 - 10 most commonly used chipher suites
+>>> chiper_suites = https.filter(lambda row: row.p443.https.tls is not None and row.p443.https.tls.cipher_suite is not None).map(lambda row: (row.p443.https.tls.cipher_suite.name, 1)).reduceByKey(lambda a,b: a+b).sortBy(lambda x: x[1], False)
+[Stage 38:>                                                       (0 + 19) / 19]
+>>> for k,v in chiper_suites.collect()[:10]:                                    
+...     print k,v
+... 
+TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 17906
+TLS_RSA_WITH_AES_256_CBC_SHA 6053
+TLS_RSA_WITH_AES_128_GCM_SHA256 4523
+TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA 4092
+TLS_DHE_RSA_WITH_AES_256_CBC_SHA 2874
+TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 1205
+TLS_RSA_WITH_AES_128_CBC_SHA 1170
+TLS_RSA_WITH_RC4_128_SHA 1083
+TLS_DHE_RSA_WITH_AES_128_GCM_SHA256 674
+TLS_RSA_WITH_RC4_128_MD5 652
+
+Q8 - Most Used SSH Software Version
+>>> ssh = df.rdd.filter(lambda row: row.p22 is not None and row.p22.ssh is not None and row.p22.ssh is not None and row.p22.ssh.banner is not None)
+>>> software = ssh.filter(lambda row: row.p22.ssh.banner.server_id is not None and row.p22.ssh.banner.server_id.software is not None and row.p22.ssh.banner.server_id.version is not None)
+>>> software_version = software.map(lambda row: (row.p22.ssh.banner.server_id.software + "-" +row.p22.ssh.banner.server_id.version, 1)).reduceByKey(lambda a,b: a+b).sortBy(lambda x: x[1], False)
+[Stage 45:>                                                       (0 + 19) / 19]
+>>> result = software_version.collect()[:1]                                     
+>>> for k,v in result:                                                          
+...     print k,v
+... 
+OpenSSH_5.3-2.0 3154
+>>> result = software_version.collect()[:10]
+>>> for k,v in result:
+...     print k,v
+... 
+OpenSSH_5.3-2.0 3154
+OpenSSH_6.6.1p1-2.0 1725
+OpenSSH_6.6.1-2.0 1655
+OpenSSH_7.2p2-2.0 1388
+OpenSSH_6.7p1-2.0 992
+dropbear_0.46-2.0 546
+OpenSSH_6.0p1-2.0 544
+ROSSSH-2.0 497
+OpenSSH_4.3-2.0 448
+dropbear_2016.74-2.0 411
+
+
+
+
+
+
